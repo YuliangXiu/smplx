@@ -1,6 +1,6 @@
 datasets:
     mesh_folder:
-        data_folder: 'transfer_data/meshes/smpl'
+        data_folder: 'transfer_data/meshes/thuman_smpl'
 deformation_transfer_path: 'transfer_data/smpl2smplx_deftrafo_setup.pkl'
 mask_ids_fname: 'smplx_mask_ids.npy'
 summary_steps: 100
@@ -16,7 +16,7 @@ optim:
 body_model:
     model_type: "smplx"
     gender: "neutral"
-    folder: "transfer_data/body_models"
+    folder: "models"
     use_compressed: False
     use_face_contour: True
     smplx:

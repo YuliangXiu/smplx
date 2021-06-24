@@ -70,6 +70,8 @@ class SMPLHOutput(SMPLOutput):
 class SMPLXOutput(SMPLHOutput):
     expression: Optional[Tensor] = None
     jaw_pose: Optional[Tensor] = None
+    joint_transformation: Optional[Tensor] = None
+    vertex_transformation: Optional[Tensor] = None
 
 
 @dataclass

@@ -25,11 +25,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-import logging
-logging.getLogger("smplx").setLevel(logging.ERROR)
-
 from .lbs import (
-    lbs, vertices2landmarks, find_dynamic_lmk_idx_and_bcoords)
+    lbs, vertices2landmarks, find_dynamic_lmk_idx_and_bcoords, blend_shapes)
 
 from .vertex_ids import vertex_ids as VERTEX_IDS
 from .utils import (
@@ -51,7 +48,7 @@ class SMPL(nn.Module):
 
     def __init__(
         self, model_path: str,
-        kid_template_path: str = '',
+	kid_template_path: str = '',
         data_struct: Optional[Struct] = None,
         create_betas: bool = True,
         betas: Optional[Tensor] = None,
@@ -69,7 +66,6 @@ class SMPL(nn.Module):
         age: str = 'adult',
         vertex_ids: Dict[str, int] = None,
         v_template: Optional[Union[Tensor, Array]] = None,
-        v_personal: Optional[Union[Tensor, Array]] = None,
         **kwargs
     ) -> None:
         ''' SMPL model constructor
@@ -145,12 +141,12 @@ class SMPL(nn.Module):
         self.batch_size = batch_size
         shapedirs = data_struct.shapedirs
         if (shapedirs.shape[-1] < self.SHAPE_SPACE_DIM):
-            # print(f'WARNING: You are using a {self.name()} model, with only'
-            #       ' 10 shape coefficients.')
+            print(f'WARNING: You are using a {self.name()} model, with only'
+                  ' 10 shape coefficients.')
             num_betas = min(num_betas, 10)
         else:
             num_betas = min(num_betas, self.SHAPE_SPACE_DIM)
-            
+
         if self.age=='kid':
             v_template_smil = np.load(kid_template_path)
             v_template_smil -= np.mean(v_template_smil, axis=0)
@@ -239,17 +235,11 @@ class SMPL(nn.Module):
 
         if v_template is None:
             v_template = data_struct.v_template
-            
         if not torch.is_tensor(v_template):
             v_template = to_tensor(to_np(v_template), dtype=dtype)
-                
-        if v_personal is not None:
-            v_personal = to_tensor(to_np(v_personal), dtype=dtype)
-            v_template += v_personal
-                
         # The vertices of the template model
         self.register_buffer('v_template', v_template)
-        
+
         j_regressor = to_tensor(to_np(
             data_struct.J_regressor), dtype=dtype)
         self.register_buffer('J_regressor', j_regressor)
@@ -266,8 +256,8 @@ class SMPL(nn.Module):
         parents[0] = -1
         self.register_buffer('parents', parents)
 
-        self.register_buffer(
-            'lbs_weights', to_tensor(to_np(data_struct.weights), dtype=dtype))
+        lbs_weights = to_tensor(to_np(data_struct.weights), dtype=dtype)
+        self.register_buffer('lbs_weights', lbs_weights)
 
     @property
     def num_betas(self):
@@ -304,6 +294,14 @@ class SMPL(nn.Module):
             f'Betas: {self.num_betas}',
         ]
         return '\n'.join(msg)
+
+    def forward_shape(
+        self,
+        betas: Optional[Tensor] = None,
+    ) -> SMPLOutput:
+        betas = betas if betas is not None else self.betas
+        v_shaped = self.v_template + blend_shapes(betas, self.shapedirs)
+        return SMPLOutput(vertices=v_shaped, betas=betas, v_shaped=v_shaped)
 
     def forward(
         self,
@@ -900,7 +898,7 @@ class SMPLX(SMPLH):
 
     def __init__(
         self, model_path: str,
-        kid_template_path: str = '',
+	kid_template_path: str = '',
         num_expression_coeffs: int = 10,
         create_expression: bool = True,
         expression: Optional[Tensor] = None,
@@ -1050,8 +1048,8 @@ class SMPLX(SMPLH):
             shapedirs = shapedirs[:, :, None]
         if (shapedirs.shape[-1] < self.SHAPE_SPACE_DIM +
                 self.EXPRESSION_SPACE_DIM):
-            # print(f'WARNING: You are using a {self.name()} model, with only'
-            #       ' 10 shape and 10 expression coefficients.')
+            print(f'WARNING: You are using a {self.name()} model, with only'
+                  ' 10 shape and 10 expression coefficients.')
             expr_start_idx = 10
             expr_end_idx = 20
             num_expression_coeffs = min(num_expression_coeffs, 10)
@@ -1125,8 +1123,7 @@ class SMPLX(SMPLH):
         return_verts: bool = True,
         return_full_pose: bool = False,
         pose2rot: bool = True,
-        return_joint_transformation: bool = False,
-        return_vertex_transformation: bool = False,
+        return_shaped: bool = True,
         **kwargs
     ) -> SMPLXOutput:
         '''
@@ -1208,10 +1205,14 @@ class SMPLX(SMPLH):
             right_hand_pose = torch.einsum(
                 'bi,ij->bj', [right_hand_pose, self.right_hand_components])
 
-        full_pose = torch.cat([global_orient, body_pose,
-                               jaw_pose, leye_pose, reye_pose,
-                               left_hand_pose,
-                               right_hand_pose], dim=1)
+        full_pose = torch.cat([global_orient.reshape(-1, 1, 3),
+                               body_pose.reshape(-1, self.NUM_BODY_JOINTS, 3),
+                               jaw_pose.reshape(-1, 1, 3),
+                               leye_pose.reshape(-1, 1, 3),
+                               reye_pose.reshape(-1, 1, 3),
+                               left_hand_pose.reshape(-1, 15, 3),
+                               right_hand_pose.reshape(-1, 15, 3)],
+                              dim=1).reshape(-1, 165)
 
         # Add the mean pose of the model. Does not affect the body, only the
         # hands when flat_hand_mean == False
@@ -1227,18 +1228,11 @@ class SMPLX(SMPLH):
 
         shapedirs = torch.cat([self.shapedirs, self.expr_dirs], dim=-1)
 
-        if return_joint_transformation or return_vertex_transformation:
-             vertices, joints, joint_transformation, vertex_transformation = lbs(shape_components, full_pose, self.v_template,
+        vertices, joints = lbs(shape_components, full_pose, self.v_template,
                                shapedirs, self.posedirs,
                                self.J_regressor, self.parents,
-                               self.lbs_weights, pose2rot=pose2rot, return_transformation=True
+                               self.lbs_weights, pose2rot=pose2rot,
                                )
-        else:
-            vertices, joints = lbs(shape_components, full_pose, self.v_template,
-                                shapedirs, self.posedirs,
-                                self.J_regressor, self.parents,
-                                self.lbs_weights, pose2rot=pose2rot,
-                                )
 
         lmk_faces_idx = self.lmk_faces_idx.unsqueeze(
             dim=0).expand(batch_size, -1).contiguous()
@@ -1276,6 +1270,9 @@ class SMPLX(SMPLH):
             joints += transl.unsqueeze(dim=1)
             vertices += transl.unsqueeze(dim=1)
 
+        v_shaped = None
+        if return_shaped:
+            v_shaped = self.v_template + blend_shapes(betas, self.shapedirs)
         output = SMPLXOutput(vertices=vertices if return_verts else None,
                              joints=joints,
                              betas=betas,
@@ -1285,9 +1282,8 @@ class SMPLX(SMPLH):
                              left_hand_pose=left_hand_pose,
                              right_hand_pose=right_hand_pose,
                              jaw_pose=jaw_pose,
-                             full_pose=full_pose if return_full_pose else None,
-                             joint_transformation=joint_transformation if return_joint_transformation else None,
-                             vertex_transformation=vertex_transformation if return_vertex_transformation else None)
+                             v_shaped=v_shaped,
+                             full_pose=full_pose if return_full_pose else None)
         return output
 
 
@@ -1436,7 +1432,7 @@ class SMPLXLayer(SMPLX):
         vertices, joints = lbs(shape_components, full_pose, self.v_template,
                                shapedirs, self.posedirs,
                                self.J_regressor, self.parents,
-                               self.lbs_weights, 
+                               self.lbs_weights,
                                pose2rot=False,
                                )
 
@@ -1912,8 +1908,8 @@ class FLAME(SMPL):
             shapedirs = shapedirs[:, :, None]
         if (shapedirs.shape[-1] < self.SHAPE_SPACE_DIM +
                 self.EXPRESSION_SPACE_DIM):
-            # print(f'WARNING: You are using a {self.name()} model, with only'
-            #       ' 10 shape and 10 expression coefficients.')
+            print(f'WARNING: You are using a {self.name()} model, with only'
+                  ' 10 shape and 10 expression coefficients.')
             expr_start_idx = 10
             expr_end_idx = 20
             num_expression_coeffs = min(num_expression_coeffs, 10)
@@ -2089,7 +2085,7 @@ class FLAME(SMPL):
         lmk_faces_idx = self.lmk_faces_idx.unsqueeze(
             dim=0).expand(batch_size, -1).contiguous()
         lmk_bary_coords = self.lmk_bary_coords.unsqueeze(dim=0).repeat(
-            self.batch_size, 1, 1)
+            batch_size, 1, 1)
         if self.use_face_contour:
             lmk_idx_and_bcoords = find_dynamic_lmk_idx_and_bcoords(
                 vertices, full_pose, self.dynamic_lmk_faces_idx,
@@ -2239,7 +2235,7 @@ class FLAMELayer(FLAME):
         lmk_faces_idx = self.lmk_faces_idx.unsqueeze(
             dim=0).expand(batch_size, -1).contiguous()
         lmk_bary_coords = self.lmk_bary_coords.unsqueeze(dim=0).repeat(
-            self.batch_size, 1, 1)
+            batch_size, 1, 1)
         if self.use_face_contour:
             lmk_idx_and_bcoords = find_dynamic_lmk_idx_and_bcoords(
                 vertices, full_pose, self.dynamic_lmk_faces_idx,

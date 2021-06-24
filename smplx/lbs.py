@@ -18,7 +18,7 @@ from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import division
 
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 import numpy as np
 
 import torch
@@ -159,7 +159,8 @@ def lbs(
     parents: Tensor,
     lbs_weights: Tensor,
     pose2rot: bool = True,
-) -> Tuple[Tensor, Tensor]:
+    return_transformation: bool = False,
+) -> Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]:
     ''' Performs Linear Blend Skinning with the given shape and pose parameters
 
         Parameters
@@ -203,7 +204,7 @@ def lbs(
 
     # Add shape contribution
     v_shaped = v_template + blend_shapes(betas, shapedirs)
-
+    
     # Get the joints
     # NxJx3 array
     J = vertices2joints(J_regressor, v_shaped)
@@ -244,6 +245,9 @@ def lbs(
     v_homo = torch.matmul(T, torch.unsqueeze(v_posed_homo, dim=-1))
 
     verts = v_homo[:, :, :3, 0]
+    
+    if return_transformation:
+        return verts, J_transformed, A, T
 
     return verts, J_transformed
 

@@ -49,13 +49,36 @@ def main(model_folder,
         expression = torch.randn(
             [1, model.num_expression_coeffs], dtype=torch.float32)
 
-    output = model(betas=betas, expression=expression,
-                   return_verts=True)
+    body_pose = 0.2*torch.randn(
+            [1, 63], dtype=torch.float32)
+    
+    transl = 0.2*torch.randn(
+            [1, 3], dtype=torch.float32)
+    
+    global_orient = 0.2*torch.randn(
+            [1, 3], dtype=torch.float32)
+
+    # Customized forward function
+    # Specify return_joint_transformation=True or return_vertex_transformation=True,
+    # Then joint_transformation or vertex_transformation can be returned respectively
+    # output = model(betas=betas, expression=expression, body_pose=body_pose,
+    #                return_verts=True, return_joint_transformation=True, return_vertex_transformation=True)
+    
+    output = model(betas=betas, expression=expression, 
+                   body_pose=body_pose, transl=transl, global_orient=global_orient,
+                   return_verts=True, 
+                   return_joint_transformation=True, return_vertex_transformation=True)
+    
     vertices = output.vertices.detach().cpu().numpy().squeeze()
     joints = output.joints.detach().cpu().numpy().squeeze()
 
     print('Vertices shape =', vertices.shape)
     print('Joints shape =', joints.shape)
+    print('Joints transformation shape')
+    print(output.joint_transformation.detach().cpu().numpy().shape)
+    print('Vertex transformation shape')
+    print(output.vertex_transformation.detach().cpu().numpy().shape)
+
 
     if plotting_module == 'pyrender':
         import pyrender
@@ -77,7 +100,50 @@ def main(model_folder,
             joints_pcl = pyrender.Mesh.from_trimesh(sm, poses=tfs)
             scene.add(joints_pcl)
 
+        print("Close the visualization window to depose.")
         pyrender.Viewer(scene, use_raymond_lighting=True)
+        
+        
+        # Depose the body according to vertex transformation:
+        vertex_inverse_transformation = torch.inverse(output.vertex_transformation)[0]
+        homogen_coord = torch.ones([vertices.shape[0], 1], dtype=torch.float32)
+
+        v_posed_homo = torch.cat([torch.tensor(vertices), homogen_coord], dim=1)
+        v_homo = torch.matmul(vertex_inverse_transformation, torch.unsqueeze(v_posed_homo, dim=-1))
+        v_cano = v_homo.detach().cpu().numpy()[:,:3,0]
+        
+        tri_mesh = trimesh.Trimesh(v_cano, model.faces,
+                                   vertex_colors=vertex_colors)
+
+        mesh = pyrender.Mesh.from_trimesh(tri_mesh)
+
+        scene = pyrender.Scene()
+        scene.add(mesh)
+        print("Deposed according to vertex transformation.")
+        print("Close the visualization window for deposing based on joint transformation.")
+        pyrender.Viewer(scene, use_raymond_lighting=True)
+
+        # Depose the body according to skinning weights and joint transformation
+        lbsw = model.lbs_weights
+        joint_transformation = output.joint_transformation
+        vertex_transformation = torch.matmul(lbsw, joint_transformation.view(-1, 16)).view(-1, 4, 4)
+        vertex_inverse_transformation = torch.inverse(vertex_transformation)
+        homogen_coord = torch.ones([vertices.shape[0], 1], dtype=torch.float32)
+
+        v_posed_homo = torch.cat([torch.tensor(vertices), homogen_coord], dim=1)
+        v_homo = torch.matmul(vertex_inverse_transformation, torch.unsqueeze(v_posed_homo, dim=-1))
+        v_cano = v_homo.detach().cpu().numpy()[:,:3,0]
+        
+        tri_mesh = trimesh.Trimesh(v_cano, model.faces,
+                                   vertex_colors=vertex_colors)
+
+        mesh = pyrender.Mesh.from_trimesh(tri_mesh)
+
+        scene = pyrender.Scene()
+        scene.add(mesh)
+        print("Close the visualization window to exit.")
+        pyrender.Viewer(scene, use_raymond_lighting=True)
+
     elif plotting_module == 'matplotlib':
         from matplotlib import pyplot as plt
         from mpl_toolkits.mplot3d import Axes3D

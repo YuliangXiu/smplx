@@ -106,4 +106,9 @@ venv.bak/
 
 # mypy
 .mypy_cache/
-
+models/
+output/
+outputs/
+transfer_data/
+torch-trust-ncg/
+build/
