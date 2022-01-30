@@ -31,10 +31,10 @@ import numpy as np
 
 def clean_fn(fn, output_folder='output'):
     with open(fn, 'rb') as body_file:
-        body_data = pickle.load(body_file)
+        body_data = pickle.load(body_file, encoding='iso-8859-1')
 
     output_dict = {}
-    for key, data in body_data.iteritems():
+    for key, data in body_data.items():
         if 'chumpy' in str(type(data)):
             output_dict[key] = np.array(data)
         else:

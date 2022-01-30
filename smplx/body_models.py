@@ -17,13 +17,14 @@
 from typing import Optional, Dict, Union
 import os
 import os.path as osp
-
+132
 import pickle
 
 import numpy as np
 
 import torch
 import torch.nn as nn
+from collections import namedtuple
 
 import logging
 logging.getLogger("smplx").setLevel(logging.ERROR)
@@ -42,6 +43,13 @@ from .utils import (
     find_joint_kin_chain)
 from .vertex_joint_selector import VertexJointSelector
 
+ModelOutput = namedtuple('ModelOutput',
+                         ['vertices', 'joints', 'full_pose', 'betas',
+                          'global_orient',
+                          'body_pose', 'expression',
+                          'left_hand_pose', 'right_hand_pose',
+                          'jaw_pose'])
+ModelOutput.__new__.__defaults__ = (None,) * len(ModelOutput._fields)
 
 class SMPL(nn.Module):
 
