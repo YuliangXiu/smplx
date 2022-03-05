@@ -17,10 +17,10 @@
 from typing import Optional, Dict, Union
 import os
 import os.path as osp
-132
 import pickle
 
 import numpy as np
+from termcolor import colored
 
 import torch
 import torch.nn as nn
@@ -148,7 +148,7 @@ class SMPL(nn.Module):
             with open(smpl_path, 'rb') as smpl_file:
                 data_struct = Struct(**pickle.load(smpl_file,
                                                    encoding='latin1'))
-
+        
         super(SMPL, self).__init__()
         self.batch_size = batch_size
         shapedirs = data_struct.shapedirs
@@ -986,6 +986,8 @@ class SMPLX(SMPLH):
             model_data = np.load(smplx_path, allow_pickle=True)
         else:
             raise ValueError('Unknown extension: {}'.format(ext))
+        
+        print(colored(f"Use SMPL-X: {smplx_path}", "green"))
 
         data_struct = Struct(**model_data)
 
@@ -1211,8 +1213,7 @@ class SMPLX(SMPLH):
                 transl = self.transl
 
         if self.use_pca:
-            left_hand_pose = torch.einsum(
-                'bi,ij->bj', [left_hand_pose, self.left_hand_components])
+            left_hand_pose = torch.einsum('bi,ij->bj', [left_hand_pose, self.left_hand_components])
             right_hand_pose = torch.einsum(
                 'bi,ij->bj', [right_hand_pose, self.right_hand_components])
 
