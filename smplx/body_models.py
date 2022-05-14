@@ -733,6 +733,7 @@ class SMPLH(SMPL):
         full_pose = torch.cat([global_orient, body_pose,
                                left_hand_pose,
                                right_hand_pose], dim=1)
+        
         full_pose += self.pose_mean
 
         vertices, joints = lbs(betas, full_pose, self.v_template,
@@ -899,13 +900,13 @@ class SMPLX(SMPLH):
     which includes joints for the neck, jaw, eyeballs and fingers.
     '''
 
-    NUM_BODY_JOINTS = SMPLH.NUM_BODY_JOINTS
+    NUM_BODY_JOINTS = SMPLH.NUM_BODY_JOINTS # 21
     NUM_HAND_JOINTS = 15
     NUM_FACE_JOINTS = 3
     NUM_JOINTS = NUM_BODY_JOINTS + 2 * NUM_HAND_JOINTS + NUM_FACE_JOINTS
     EXPRESSION_SPACE_DIM = 100
     NECK_IDX = 12
-
+    
     def __init__(
         self, model_path: str,
         kid_template_path: str = '',
@@ -987,7 +988,7 @@ class SMPLX(SMPLH):
         else:
             raise ValueError('Unknown extension: {}'.format(ext))
         
-        print(colored(f"Use SMPL-X: {smplx_path}", "green"))
+        # print(colored(f"Use SMPL-X: {smplx_path}", "green"))
 
         data_struct = Struct(**model_data)
 
